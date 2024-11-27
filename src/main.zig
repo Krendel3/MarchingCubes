@@ -4,7 +4,7 @@ const glfw = @import("zglfw");
 const gl = @import("zgl");
 const zm = @import("zmath");
 
-const marchCompute = @import("libs/marchingCubesCompute.zig");
+const march = @import("libs/marchingCubesCompute.zig");
 const shaders = @import("shaders.zig");
 const glib = @import("glib.zig");
 
@@ -13,22 +13,15 @@ const lvec2 = @Vector(2, f64);
 
 var window: *glfw.Window = undefined;
 
-var camera_transform: glib.transform = .{ .pos = glib.vec3{ 0, 0, -4 } };
+var camera_transform: glib.transform = .{ .pos = glib.vec3{ 12, 12, -4 } };
 var camera_data: glib.cameraData = .{};
 const player_speed: f32 = 30;
 const mouse_sensitivity: f32 = 4;
 
-var cube_transform: glib.transform = .{ .pos = .{ 0, 0, 0 } };
-var program: gl.Program = undefined;
-var vbo: gl.Buffer = undefined;
-var vao: gl.VertexArray = undefined;
-var ibo: gl.Buffer = undefined;
-
 //march
-var march_vao: gl.VertexArray = undefined;
-var march_vbo: gl.Buffer = undefined;
 var march_shader: gl.Program = undefined;
 var weights_buffer: gl.Buffer = undefined;
+var chunks = [_]march.chunkData{.{}} ** 27;
 //mouse input
 var mouse_pos: lvec2 = .{ 0, 0 };
 var mouse_delta: glib.vec2 = .{ 0, 0 };
@@ -45,48 +38,6 @@ var delta_time: f64 = 0.0;
 var frame_counter: u8 = 0;
 var delta_sum: f64 = 0;
 const fps_sample_count: u8 = 60;
-
-const vertices = [_]f32{
-    //front verts
-    0.5, 0.5, 0, //tr
-    0, 1, 0, //top normal
-    0.5, -0.5, 0, //br
-    0, 0, -1, //front normal
-    -0.5, 0.5, 0, //tl
-    0, 0, 0, //unused normal
-    -0.5, -0.5, 0, //bl
-    -1, 0, 0, //left normal
-    //back verts
-    0.5, 0.5, 1, //tr
-    1, 0, 0, //right normal
-    0.5, -0.5, 1, //br
-    0, 0, 0, //unused normal
-    -0.5, 0.5, 1, //tl
-    0, 0, 1, //back normal
-    -0.5, -0.5, 1, //bl
-    0, -1, 0, //bottom normal
-};
-
-const indices = [_]u8{
-    //front
-    2, 0, 1,
-    3, 2, 1,
-    //back
-    5, 4, 6,
-    7, 5, 6,
-    //top
-    6, 4, 0,
-    2, 6, 0,
-    //bottom
-    1, 5, 7,
-    3, 1, 7,
-    //left
-    6, 2, 3,
-    7, 6, 3,
-    //right
-    1, 0, 4,
-    5, 1, 4,
-};
 
 pub fn main() !void {
     try glfw.init();
@@ -108,62 +59,9 @@ pub fn main() !void {
 
     try gl.loadExtensions(void, getProcAddressWrapper);
 
-    march_vao = gl.genVertexArray();
-    defer gl.deleteVertexArray(march_vao);
-    march_vbo = gl.genBuffer();
-    defer gl.deleteBuffer(march_vbo);
-
-    vao = gl.genVertexArray();
-    defer gl.deleteVertexArray(vao);
-    vbo = gl.genBuffer();
-    defer gl.deleteBuffer(vbo);
-    ibo = gl.genBuffer();
-    defer gl.deleteBuffer(ibo);
-
-    //cube
-    {
-        gl.bindVertexArray(vao);
-        defer gl.bindVertexArray(.invalid);
-        gl.bindBuffer(vbo, .array_buffer);
-        defer gl.bindBuffer(.invalid, .array_buffer);
-        gl.bindBuffer(ibo, .element_array_buffer);
-        defer gl.bindBuffer(.invalid, .element_array_buffer);
-
-        gl.bufferData(
-            .array_buffer,
-            f32,
-            @as([]align(1) const f32, try std.math.alignCast(1, vertices[0..])),
-            .static_draw,
-        );
-        gl.bufferData(
-            .element_array_buffer,
-            u8,
-            @as([]align(1) const u8, try std.math.alignCast(1, indices[0..])),
-            .static_draw,
-        );
-
-        //positions
-        gl.vertexAttribPointer(0, 3, .float, false, 6 * 4, 0);
-        //normals
-        gl.vertexAttribPointer(1, 3, .float, false, 6 * 4, 3 * 4);
-
-        gl.enableVertexAttribArray(0);
-        gl.enableVertexAttribArray(1);
-    }
-    //march
-    {
-        gl.bindVertexArray(march_vao);
-        defer gl.bindVertexArray(.invalid);
-        gl.bindBuffer(march_vbo, .array_buffer);
-        defer gl.bindBuffer(.invalid, .array_buffer);
-
-        gl.vertexAttribPointer(0, 3, .half_float, false, 3 * 2, 0);
-        gl.enableVertexAttribArray(0);
-    }
     var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-    program = try shaders.shaderProgramFromFiles("triangle", &allocator);
     march_shader = try shaders.shaderProgramFromFiles("simple", &allocator);
 
     //lock and hide cursor
@@ -174,8 +72,8 @@ pub fn main() !void {
 
     //enable culling,depth testing
     gl.enable(.cull_face);
-    //gl.enable(.depth_test);
-
+    gl.enable(.depth_test);
+    gl.depthFunc(.less_or_equal);
     //vsync
     glfw.swapInterval(0);
     //const weights
@@ -183,7 +81,14 @@ pub fn main() !void {
 
     var timer = try std.time.Timer.start();
 
-    try marchCompute.init(&allocator);
+    try march.init(&allocator);
+    for (0..chunks.len) |i| {
+        const chunkID: glib.int3 = .{ @as(i32, @intCast(i % 3)), @as(i32, @intCast(i / 3 % 3)), @as(i32, @intCast(i / 9 % 3)) }; //
+        march.calculateWeights(chunkID);
+        try march.getMeshIndirect(chunkID, &chunks[i]);
+        //std.debug.print("{d} \n", .{chunks[i].vertices.len});
+    }
+
     while (!window.shouldClose()) {
         glfw.pollEvents();
         //clear
@@ -199,27 +104,14 @@ pub fn main() !void {
         try playerLoop();
         renderLoop();
     }
+    for (chunks) |ch| ch.free();
 }
 var testicle: f32 = 0;
 var march_verts: usize = 0;
-
 fn playerLoop() !void {
-    const weights = marchCompute.getWeights(.{ 0, 0, 0 });
-    const verts: []f16 = marchCompute.constructMesh(weights);
-    march_verts = verts.len;
-    {
-        gl.bindVertexArray(march_vao);
-        defer gl.bindVertexArray(.invalid);
-        gl.bindBuffer(march_vbo, .array_buffer);
-        defer gl.bindBuffer(.invalid, .array_buffer);
 
-        gl.bufferData(
-            .array_buffer,
-            f16,
-            @as([]align(1) const f16, (try std.math.alignCast(1, verts.ptr))[0..verts.len]),
-            .static_draw,
-        );
-    }
+    //std.debug.print("{d} \n", .{chunk.vertices});
+    //const verts: []f32 = marchCompute.constructMesh(marchCompute.getWeights(chunkID));
     //get mouse position and delta
     const y_rot_clamp: f32 = std.math.rad_per_deg * 90 - 0.001; // -epsilon
     handleMouseInput();
@@ -240,38 +132,22 @@ fn renderLoop() void {
     const aspect_ratio = @as(f32, @floatFromInt(size[0])) / @as(f32, @floatFromInt(size[1]));
 
     const w2c = glib.getWorldToClipMatrix(camera_transform, .{}, aspect_ratio);
-    const world_to_clip = zm.mul(
-        cube_transform.modelMatrix(),
-        w2c,
-    );
 
     //clear
     gl.clearColor(0.2, 0.2, 0.2, 1);
-    gl.clear(.{ .color = true });
+    gl.clear(.{ .color = true, .depth = true });
 
-    //cube
-    gl.useProgram(program);
-
-    const matrix_attrib = gl.getUniformLocation(program, "matrix");
-    gl.binding.uniformMatrix4fv(@intCast(matrix_attrib.?), @as(gl.SizeI, @intCast(1)), gl.binding.TRUE, zm.arrNPtr(&world_to_clip));
-
-    const light_dir_attrib = gl.getUniformLocation(program, "lightDir");
-    gl.uniform3fv(light_dir_attrib, &.{light_dir});
-
-    const cam_pos_attrib = gl.getUniformLocation(program, "camPos");
-    gl.uniform3fv(cam_pos_attrib, &.{camera_transform.pos});
-
-    gl.bindVertexArray(vao);
-    gl.bindBuffer(ibo, .element_array_buffer);
-    gl.drawElements(.triangles, indices.len, .unsigned_byte, 0);
     //march
     gl.useProgram(march_shader);
 
     const march_matrix_attrib = gl.getUniformLocation(march_shader, "matrix");
     gl.binding.uniformMatrix4fv(@intCast(march_matrix_attrib.?), @as(gl.SizeI, @intCast(1)), gl.binding.TRUE, zm.arrNPtr(&w2c));
-
-    gl.bindVertexArray(march_vao);
-    gl.drawArrays(.triangles, 0, march_verts);
+    gl.bindBuffer(.invalid, .array_buffer);
+    for (0..chunks.len) |i| {
+        try chunks[i].bufferData();
+        gl.bindVertexArray(march.vao);
+        gl.drawArrays(.triangles, 0, chunks[i].vertices.len);
+    }
     window.swapBuffers();
 }
 

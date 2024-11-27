@@ -1,0 +1,85 @@
+const powers2 = computePowers();
+pub fn constructMesh(weights: []u8) []f32 {
+    var result = [_]f32{0} ** (5 * voxel_chunk * 9);
+    var index_counter: usize = 0;
+    for (0..voxel_chunk) |i| {
+        const coord: int3 = index2coordS(i, voxel_axis);
+        const cube_values = [8]u8{
+            weights[coord2index(coord[0], coord[1], coord[2] + 1)],
+            weights[coord2index(coord[0] + 1, coord[1], coord[2] + 1)],
+            weights[coord2index(coord[0] + 1, coord[1], coord[2])],
+            weights[coord2index(coord[0], coord[1], coord[2])],
+            weights[coord2index(coord[0], coord[1] + 1, coord[2] + 1)],
+            weights[coord2index(coord[0] + 1, coord[1] + 1, coord[2] + 1)],
+            weights[coord2index(coord[0] + 1, coord[1] + 1, coord[2])],
+            weights[coord2index(coord[0], coord[1] + 1, coord[2])],
+        };
+        var cube_index: u8 = 0;
+        for (0..8) |j| {
+            if (cube_values[j] > iso) cube_index |= powers2[j];
+        }
+        const edges = lookup.tri_table[cube_index];
+        var iter: u8 = 0;
+
+        while (edges[iter] != 12) {
+            const e00 = lookup.edge_connections[edges[iter]][0];
+            const e01 = lookup.edge_connections[edges[iter]][1];
+            const e10 = lookup.edge_connections[edges[iter + 1]][0];
+            const e11 = lookup.edge_connections[edges[iter + 1]][1];
+            const e20 = lookup.edge_connections[edges[iter + 2]][0];
+            const e21 = lookup.edge_connections[edges[iter + 2]][1];
+            var tri = interpolate(lookup.corner_offsets[e00], lookup.corner_offsets[e01]) + i2v(coord);
+            for (0..3) |tri_index| result[index_counter + tri_index] = tri[tri_index];
+            index_counter += 3;
+            tri = interpolate(lookup.corner_offsets[e10], lookup.corner_offsets[e11]) + i2v(coord);
+            for (0..3) |tri_index| result[index_counter + tri_index] = tri[tri_index];
+            index_counter += 3;
+            tri = interpolate(lookup.corner_offsets[e20], lookup.corner_offsets[e21]) + i2v(coord);
+            for (0..3) |tri_index| result[index_counter + tri_index] = tri[tri_index];
+            index_counter += 3;
+            iter += 3;
+        }
+    }
+    return result[0..index_counter];
+}
+
+fn interpolate(x: vec3, y: vec3) vec3 {
+    return std.math.lerp(x, y, glib.splat(vec3, 0.5));
+}
+fn remap(val: f32) u8 {
+    var value: f32 = (std.math.clamp(val, -1, 1) * 0.5 + 0.5) * 255;
+    value = std.math.floor(value);
+    return @as(u8, @intFromFloat(value));
+}
+fn coord2index(x: i32, y: i32, z: i32) usize {
+    return coord2indexS(x, y, z, point_axis);
+}
+fn coord2indexS(x: i32, y: i32, z: i32, axis: i32) usize {
+    return @intCast(x + (y + z * axis) * axis);
+}
+
+fn index2coord(i: usize) int3 {
+    return index2coordS(i, point_axis);
+}
+fn index2coordS(i: usize, axis: usize) int3 {
+    return .{
+        @intCast(i % axis),
+        @intCast(i / axis % axis),
+        @intCast(i / (axis * axis) % axis),
+    };
+}
+inline fn computePowers() [8]u8 {
+    var res = [_]u8{0} ** 8;
+    inline for (0..8) |i| {
+        res[i] = std.math.pow(u8, 2, i);
+    }
+    return res;
+}
+pub fn v2i(i: vec3) int3 {
+    return int3{
+        @intFromFloat(i[0]),
+        @intFromFloat(i[1]),
+        @intFromFloat(i[2]),
+    };
+}
+

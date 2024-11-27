@@ -1,1 +1,1 @@
-Compute shader marching cubes implementation in Zig.
+Marching cubes implementation in Zig (openGL,compute shaders).

@@ -46,7 +46,7 @@ pub const mesh = struct {
 pub const cameraData = struct {
     fov: f32 = 60,
     near: f32 = 0.3,
-    far: f32 = 100,
+    far: f32 = 1000,
     const Self = @This();
     pub fn getPerspMatrix(self: Self, aspect_ratio: f32) zm.Mat {
         return zm.perspectiveFovLhGl(

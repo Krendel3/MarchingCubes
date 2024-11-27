@@ -1,174 +1,158 @@
 const std = @import("std");
 const gl = @import("zgl");
+const shaders = @import("../shaders.zig");
 const glib = @import("../glib.zig");
+const int3 = glib.int3;
+const vec3 = glib.vec3;
 const lookup = @import("marchingTable.zig");
-const short3 = @Vector(3, f16);
+
 const point_axis = 24;
 pub const point_chunk = point_axis * point_axis * point_axis;
-pub const weight_buffer_size = point_axis * point_axis * point_axis / 4;
 
 const voxel_axis = point_axis - 1;
 const voxel_chunk = voxel_axis * voxel_axis * voxel_axis;
+const max_vertex_count = voxel_chunk * 9 * 5;
 
 const chunkSize = 16;
 
-const chunkWeights = [point_chunk]u8;
 //noise data
 
 //values
-const powers2 = computePowers();
+
 const seed = 28616;
 const freqeuncy = 0.03;
-const amplitude: f16 = 10;
+const amplitude: f32 = 10;
 pub const iso: u8 = 128;
 
 //shader
+pub var vao: gl.VertexArray = undefined;
 var weight_buffer: gl.Buffer = undefined;
+pub var vertex_buffer: gl.Buffer = undefined;
+var vertex_counter_buffer: gl.Buffer = undefined;
 var noise_shader: gl.Program = undefined;
+var mesh_shader: gl.Program = undefined;
 var allocator: *const std.mem.Allocator = undefined;
-var empty: [weight_buffer_size]u32 = undefined;
 
-var chunk_id_uniform: ?u32 = undefined;
+var chunk_id_uniform_noise: ?u32 = undefined;
+var chunk_id_uniform_mesh: ?u32 = undefined;
 
+//assign separate vao
+pub const chunkData = struct {
+    weights: [point_chunk]u8 = undefined,
+    vertices: []f32 = undefined,
+    const Self = @This();
+    pub fn bufferData(self: Self) !void {
+        gl.namedBufferData(
+            vertex_buffer,
+            f32,
+            @alignCast(self.vertices),
+            .dynamic_copy,
+        );
+    }
+
+    pub fn free(self: Self) void {
+        allocator.free(self.vertices);
+    }
+};
 const marchError = error{
     noiseFailed,
+    meshFailed,
 };
 pub fn init(alloc: *const std.mem.Allocator) !void {
+    //initialize the weight buffer
     weight_buffer = gl.genBuffer();
     gl.bindBuffer(weight_buffer, .shader_storage_buffer);
-    defer gl.bindBuffer(.invalid, .shader_storage_buffer);
-    gl.bufferData(
-        .shader_storage_buffer,
-        u32,
-        @as([]align(1) const u32, try std.math.alignCast(1, empty[0..])),
-        .dynamic_copy,
-    );
+    gl.bufferUninitialized(.shader_storage_buffer, u8, point_chunk, .dynamic_copy);
+
+    //initialize the vertex buffer
+    vertex_buffer = gl.genBuffer();
+    gl.bindBuffer(vertex_buffer, .shader_storage_buffer);
+    gl.bufferUninitialized(.shader_storage_buffer, [3]glib.vec3, voxel_chunk * 5, .dynamic_copy);
+
+    //initialize the atomic vertex counter buffer
+    vertex_counter_buffer = gl.genBuffer();
+    gl.bindBuffer(vertex_counter_buffer, .atomic_counter_buffer);
+    gl.bufferUninitialized(.atomic_counter_buffer, c_uint, 1, .dynamic_draw);
+
     allocator = alloc;
-    noise_shader = try @import("../shaders.zig").computeProgramFromFile("marchNoise", allocator);
+    noise_shader = try shaders.computeProgramFromFile("marchNoise", allocator);
+    mesh_shader = try shaders.computeProgramFromFile("marchMesh", allocator);
 
     gl.useProgram(noise_shader);
-    const size_attrib = gl.getUniformLocation(noise_shader, "chunkSize");
+    var size_attrib = gl.getUniformLocation(noise_shader, "chunkSize");
     gl.uniform1ui(size_attrib, @as(u32, point_axis));
-    chunk_id_uniform = gl.getUniformLocation(noise_shader, "chunkID");
+    chunk_id_uniform_noise = gl.getUniformLocation(noise_shader, "chunkID");
+
+    gl.useProgram(mesh_shader);
+    size_attrib = gl.getUniformLocation(mesh_shader, "chunkSize");
+    gl.uniform1ui(size_attrib, @as(u32, point_axis));
+    chunk_id_uniform_mesh = gl.getUniformLocation(mesh_shader, "chunkID");
+
+    vao = gl.genVertexArray();
+    gl.bindVertexArray(vao);
+    gl.bindBuffer(vertex_buffer, .array_buffer);
+    gl.vertexAttribPointer(0, 3, .float, false, 3 * 4, 0);
+    gl.enableVertexAttribArray(0);
+
+    gl.namedBufferData(vertex_buffer, f32, @alignCast(&([_]f32{0} ** max_vertex_count)), .dynamic_copy);
 }
-pub fn getWeights(chunk: glib.int3) []u8 {
-    gl.bindBufferBase(.shader_storage_buffer, 0, weight_buffer);
+pub fn calculateWeights(chunk: int3) void {
+    gl.namedBufferData(weight_buffer, u8, @alignCast(&([_]u8{0} ** point_chunk)), .dynamic_copy);
     gl.useProgram(noise_shader);
+    gl.bindBufferBase(.shader_storage_buffer, 0, weight_buffer);
 
     const chunkIDF = i2v(chunk);
-    gl.uniform3f(chunk_id_uniform, chunkIDF[0], chunkIDF[1], chunkIDF[2]);
+    gl.uniform3f(chunk_id_uniform_noise, chunkIDF[0], chunkIDF[1], chunkIDF[2]);
 
     const group_count: c_uint = point_axis / 8;
+
     gl.binding.dispatchCompute(group_count, group_count, group_count);
     //wait for execution to finish
     gl.binding.memoryBarrier(gl.binding.SHADER_STORAGE_BARRIER_BIT);
+}
 
-    const result = gl.mapBufferRange(
-        .shader_storage_buffer,
-        u8,
-        0,
-        point_chunk,
-        .{ .read = true },
-    );
-    _ = gl.unmapBuffer(.shader_storage_buffer);
+pub fn getWeights(chunk: int3) []u8 {
+    calculateWeights(chunk);
+    gl.bindBuffer(weight_buffer, .shader_storage_buffer);
+    const result = gl.mapBuffer(.shader_storage_buffer, u8, .read_only);
+
     return result;
 }
+pub fn getMeshIndirect(chunkID: int3, chunk: *chunkData) !void {
+    gl.namedBufferData(vertex_buffer, u8, @alignCast(&([_]u8{0} ** max_vertex_count)), .dynamic_copy);
 
-//C:\Users\daych\themolegame\THEMOLEGAME\Assets\Scripts\CaveGeneration\Compute
-//returns vertices
-//length = 5 (max vertex per voxel) * voxelChunk * 9(vertices in one triangle)
-// allocate needed space for tris
-pub fn constructMesh(weights: []u8) []f16 {
-    var result = [_]f16{0} ** (5 * voxel_chunk * 9);
-    var index_counter: usize = 0;
-    for (0..voxel_chunk) |i| {
-        const coord: glib.int3 = index2coordS(i, voxel_axis);
-        const cube_values = [8]u8{
-            weights[coord2index(coord[0], coord[1], coord[2] + 1)],
-            weights[coord2index(coord[0] + 1, coord[1], coord[2] + 1)],
-            weights[coord2index(coord[0] + 1, coord[1], coord[2])],
-            weights[coord2index(coord[0], coord[1], coord[2])],
-            weights[coord2index(coord[0], coord[1] + 1, coord[2] + 1)],
-            weights[coord2index(coord[0] + 1, coord[1] + 1, coord[2] + 1)],
-            weights[coord2index(coord[0] + 1, coord[1] + 1, coord[2])],
-            weights[coord2index(coord[0], coord[1] + 1, coord[2])],
-        };
-        var cube_index: u8 = 0;
-        for (0..8) |j| {
-            if (cube_values[j] > iso) cube_index |= powers2[j];
-        }
-        const edges = lookup.tri_table[cube_index];
-        var iter: u8 = 0;
+    gl.useProgram(mesh_shader);
+    gl.bindBufferBase(.shader_storage_buffer, 0, weight_buffer);
+    gl.bindBufferBase(.shader_storage_buffer, 1, vertex_buffer);
+    gl.bindBufferBase(.atomic_counter_buffer, 2, vertex_counter_buffer);
 
-        while (edges[iter] != 12) {
-            const e00 = lookup.edge_connections[edges[iter]][0];
-            const e01 = lookup.edge_connections[edges[iter]][1];
-            const e10 = lookup.edge_connections[edges[iter + 1]][0];
-            const e11 = lookup.edge_connections[edges[iter + 1]][1];
-            const e20 = lookup.edge_connections[edges[iter + 2]][0];
-            const e21 = lookup.edge_connections[edges[iter + 2]][1];
-            var tri = interpolate(lookup.corner_offsets[e00], lookup.corner_offsets[e01]) + i2s(coord);
-            for (0..3) |tri_index| result[index_counter + tri_index] = tri[tri_index];
-            index_counter += 3;
-            tri = interpolate(lookup.corner_offsets[e10], lookup.corner_offsets[e11]) + i2s(coord);
-            for (0..3) |tri_index| result[index_counter + tri_index] = tri[tri_index];
-            index_counter += 3;
-            tri = interpolate(lookup.corner_offsets[e20], lookup.corner_offsets[e21]) + i2s(coord);
-            for (0..3) |tri_index| result[index_counter + tri_index] = tri[tri_index];
-            index_counter += 3;
-            iter += 3;
-        }
-    }
-    return result[0..index_counter];
+    const chunkIDF = i2v(chunkID);
+    gl.uniform3f(chunk_id_uniform_mesh, chunkIDF[0], chunkIDF[1], chunkIDF[2]);
+
+    const group_count: c_uint = (voxel_axis + 7) / 8;
+    gl.binding.dispatchCompute(group_count, group_count, group_count);
+    //wait for execution to finish
+    gl.binding.memoryBarrier(gl.binding.SHADER_STORAGE_BARRIER_BIT);
+    gl.bindBuffer(vertex_counter_buffer, .atomic_counter_buffer);
+    const tri_count = gl.mapBuffer(
+        .atomic_counter_buffer,
+        u32,
+        .read_only,
+    );
+
+    const num = tri_count[0] * 9;
+    _ = gl.unmapNamedBuffer(vertex_counter_buffer);
+    gl.namedBufferData(vertex_counter_buffer, u32, @alignCast(&([1]u32{0})), .dynamic_read);
+    chunk.vertices = try allocator.alloc(f32, num);
+    @memcpy(
+        chunk.vertices[0..],
+        @as([]align(4) f32, @alignCast(gl.mapNamedBufferRange(vertex_buffer, f32, 0, num, .{ .read = true }))),
+    );
+    //@as([*]align(1) T, @ptrCast(ptr))
+    _ = gl.unmapNamedBuffer(vertex_buffer);
 }
 
-fn interpolate(x: short3, y: short3) short3 {
-    return std.math.lerp(x, y, glib.splat(short3, 0.5));
-}
-fn remap(val: f16) u8 {
-    var value: f16 = (std.math.clamp(val, -1, 1) * 0.5 + 0.5) * 255;
-    value = std.math.floor(value);
-    return @as(u8, @intFromFloat(value));
-}
-fn coord2index(x: i32, y: i32, z: i32) usize {
-    return coord2indexS(x, y, z, point_axis);
-}
-fn coord2indexS(x: i32, y: i32, z: i32, axis: i32) usize {
-    return @intCast(x + (y + z * axis) * axis);
-}
-
-fn index2coord(i: usize) glib.int3 {
-    return index2coordS(i, point_axis);
-}
-fn index2coordS(i: usize, axis: usize) glib.int3 {
-    return .{
-        @intCast(i % axis),
-        @intCast(i / axis % axis),
-        @intCast(i / (axis * axis) % axis),
-    };
-}
-inline fn computePowers() [8]u8 {
-    var res = [_]u8{0} ** 8;
-    inline for (0..8) |i| {
-        res[i] = std.math.pow(u8, 2, i);
-    }
-    return res;
-}
-pub fn i2s(i: glib.int3) short3 {
-    return short3{
-        @floatFromInt(i[0]),
-        @floatFromInt(i[1]),
-        @floatFromInt(i[2]),
-    };
-}
-pub fn s2i(i: short3) glib.int3 {
-    return glib.int3{
-        @intFromFloat(i[0]),
-        @intFromFloat(i[1]),
-        @intFromFloat(i[2]),
-    };
-}
-pub fn i2v(i: glib.int3) glib.vec3 {
+pub fn i2v(i: int3) glib.vec3 {
     return glib.vec3{
         @floatFromInt(i[0]),
         @floatFromInt(i[1]),
