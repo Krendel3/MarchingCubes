@@ -15,8 +15,6 @@ const max_vertex_count = voxel_chunk * 9 * 5;
 
 const chunkSize = 16;
 
-//noise data
-
 //values
 
 const seed = 28616;
@@ -41,12 +39,14 @@ pub const chunkData = struct {
     weights: [point_chunk]u8 = undefined,
     vertices: []f32 = undefined,
     const Self = @This();
+
+    //dynamic/static read provides a major performace increase to my surprise
     pub fn bufferData(self: Self) !void {
-        gl.namedBufferData(
+        gl.namedBufferSubData(
             vertex_buffer,
+            0,
             f32,
             @alignCast(self.vertices),
-            .dynamic_copy,
         );
     }
 
@@ -58,21 +58,30 @@ const marchError = error{
     noiseFailed,
     meshFailed,
 };
+pub fn updateChunk(chunk: *chunkData, chunkID: int3) !void {
+    calculateWeights(chunkID);
+    try getMeshIndirect(chunkID, chunk);
+}
+pub fn drawChunk(chunk: *chunkData) !void {
+    try chunk.bufferData();
+    gl.bindVertexArray(vao);
+    gl.drawArrays(.triangles, 0, chunk.vertices.len);
+}
 pub fn init(alloc: *const std.mem.Allocator) !void {
     //initialize the weight buffer
     weight_buffer = gl.genBuffer();
     gl.bindBuffer(weight_buffer, .shader_storage_buffer);
-    gl.bufferUninitialized(.shader_storage_buffer, u8, point_chunk, .dynamic_copy);
+    gl.bufferUninitialized(.shader_storage_buffer, u8, point_chunk, .dynamic_read);
 
     //initialize the vertex buffer
     vertex_buffer = gl.genBuffer();
     gl.bindBuffer(vertex_buffer, .shader_storage_buffer);
-    gl.bufferUninitialized(.shader_storage_buffer, [3]glib.vec3, voxel_chunk * 5, .dynamic_copy);
+    gl.bufferUninitialized(.shader_storage_buffer, [3]glib.vec3, voxel_chunk * 5, .dynamic_read);
 
     //initialize the atomic vertex counter buffer
     vertex_counter_buffer = gl.genBuffer();
     gl.bindBuffer(vertex_counter_buffer, .atomic_counter_buffer);
-    gl.bufferUninitialized(.atomic_counter_buffer, c_uint, 1, .dynamic_draw);
+    gl.bufferUninitialized(.atomic_counter_buffer, c_uint, 1, .dynamic_read);
 
     allocator = alloc;
     noise_shader = try shaders.computeProgramFromFile("marchNoise", allocator);
@@ -93,11 +102,9 @@ pub fn init(alloc: *const std.mem.Allocator) !void {
     gl.bindBuffer(vertex_buffer, .array_buffer);
     gl.vertexAttribPointer(0, 3, .float, false, 3 * 4, 0);
     gl.enableVertexAttribArray(0);
-
-    gl.namedBufferData(vertex_buffer, f32, @alignCast(&([_]f32{0} ** max_vertex_count)), .dynamic_copy);
 }
 pub fn calculateWeights(chunk: int3) void {
-    gl.namedBufferData(weight_buffer, u8, @alignCast(&([_]u8{0} ** point_chunk)), .dynamic_copy);
+    gl.namedBufferData(weight_buffer, u8, @alignCast(&([_]u8{0} ** point_chunk)), .dynamic_draw);
     gl.useProgram(noise_shader);
     gl.bindBufferBase(.shader_storage_buffer, 0, weight_buffer);
 
@@ -115,12 +122,10 @@ pub fn getWeights(chunk: int3) []u8 {
     calculateWeights(chunk);
     gl.bindBuffer(weight_buffer, .shader_storage_buffer);
     const result = gl.mapBuffer(.shader_storage_buffer, u8, .read_only);
-
+    _ = gl.unmapBuffer(.shader_storage_buffer);
     return result;
 }
 pub fn getMeshIndirect(chunkID: int3, chunk: *chunkData) !void {
-    gl.namedBufferData(vertex_buffer, u8, @alignCast(&([_]u8{0} ** max_vertex_count)), .dynamic_copy);
-
     gl.useProgram(mesh_shader);
     gl.bindBufferBase(.shader_storage_buffer, 0, weight_buffer);
     gl.bindBufferBase(.shader_storage_buffer, 1, vertex_buffer);
@@ -143,15 +148,10 @@ pub fn getMeshIndirect(chunkID: int3, chunk: *chunkData) !void {
     const num = tri_count[0] * 9;
     _ = gl.unmapNamedBuffer(vertex_counter_buffer);
     gl.namedBufferData(vertex_counter_buffer, u32, @alignCast(&([1]u32{0})), .dynamic_read);
-    chunk.vertices = try allocator.alloc(f32, num);
-    @memcpy(
-        chunk.vertices[0..],
-        @as([]align(4) f32, @alignCast(gl.mapNamedBufferRange(vertex_buffer, f32, 0, num, .{ .read = true }))),
-    );
-    //@as([*]align(1) T, @ptrCast(ptr))
-    _ = gl.unmapNamedBuffer(vertex_buffer);
-}
 
+    chunk.vertices = try allocator.alloc(f32, num);
+    gl.binding.getNamedBufferSubData(@intFromEnum(vertex_buffer), 0, num * 4, chunk.vertices.ptr);
+}
 pub fn i2v(i: int3) glib.vec3 {
     return glib.vec3{
         @floatFromInt(i[0]),

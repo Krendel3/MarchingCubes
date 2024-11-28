@@ -21,7 +21,8 @@ const mouse_sensitivity: f32 = 4;
 //march
 var march_shader: gl.Program = undefined;
 var weights_buffer: gl.Buffer = undefined;
-var chunks = [_]march.chunkData{.{}} ** 27;
+const ch_dim = 3;
+var chunks = [_]march.chunkData{.{}} ** (ch_dim * ch_dim * ch_dim);
 //mouse input
 var mouse_pos: lvec2 = .{ 0, 0 };
 var mouse_delta: glib.vec2 = .{ 0, 0 };
@@ -77,17 +78,10 @@ pub fn main() !void {
     //vsync
     glfw.swapInterval(0);
     //const weights
-    //std.debug.print("{d} \n", .{verts.len});
 
     var timer = try std.time.Timer.start();
 
     try march.init(&allocator);
-    for (0..chunks.len) |i| {
-        const chunkID: glib.int3 = .{ @as(i32, @intCast(i % 3)), @as(i32, @intCast(i / 3 % 3)), @as(i32, @intCast(i / 9 % 3)) }; //
-        march.calculateWeights(chunkID);
-        try march.getMeshIndirect(chunkID, &chunks[i]);
-        //std.debug.print("{d} \n", .{chunks[i].vertices.len});
-    }
 
     while (!window.shouldClose()) {
         glfw.pollEvents();
@@ -103,15 +97,16 @@ pub fn main() !void {
 
         try playerLoop();
         renderLoop();
+        for (chunks) |ch| ch.free();
     }
-    for (chunks) |ch| ch.free();
 }
 var testicle: f32 = 0;
 var march_verts: usize = 0;
 fn playerLoop() !void {
-
-    //std.debug.print("{d} \n", .{chunk.vertices});
-    //const verts: []f32 = marchCompute.constructMesh(marchCompute.getWeights(chunkID));
+    for (0..chunks.len) |i| {
+        const chunkID: glib.int3 = .{ @as(i32, @intCast(i % ch_dim)), @as(i32, @intCast(i / ch_dim % ch_dim)), @as(i32, @intCast(i / (ch_dim * ch_dim) % ch_dim)) }; //
+        try march.updateChunk(&chunks[i], chunkID);
+    }
     //get mouse position and delta
     const y_rot_clamp: f32 = std.math.rad_per_deg * 90 - 0.001; // -epsilon
     handleMouseInput();
@@ -144,9 +139,7 @@ fn renderLoop() void {
     gl.binding.uniformMatrix4fv(@intCast(march_matrix_attrib.?), @as(gl.SizeI, @intCast(1)), gl.binding.TRUE, zm.arrNPtr(&w2c));
     gl.bindBuffer(.invalid, .array_buffer);
     for (0..chunks.len) |i| {
-        try chunks[i].bufferData();
-        gl.bindVertexArray(march.vao);
-        gl.drawArrays(.triangles, 0, chunks[i].vertices.len);
+        try march.drawChunk(&chunks[i]);
     }
     window.swapBuffers();
 }
