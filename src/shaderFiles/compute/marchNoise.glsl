@@ -7,7 +7,7 @@ layout(std430,binding = 0) buffer chunkWeights
     uint weights[];
 } weightsBuffer;
 uint index(uvec3 v){
-    return (v.x + (v.y + v.z * chunkSize) * chunkSize) / 4;
+    return (v.x + (v.y + v.z * chunkSize) * chunkSize) / 2;//>> 1;
 }
 uint modula(uint a,uint b){
     return uint(a - (b * floor(a/b)));
@@ -37,15 +37,17 @@ float getNoise(vec3 p){
     return o4.y * d.y + o4.x * (1.0 - d.y);
 }
 uint remap(float f){
-    return  uint(255 * (clamp(f,-1,1) * 0.5 + 0.5));
+    float maxVal = 65535;
+    return  uint(maxVal * (clamp(f,-1,1) * 0.5 + 0.5));
 }
 void main(){
     float freq = 0.1;
-    float amp = 0.05;
-    uint localIndex = modula(gl_GlobalInvocationID.x,4);
+    float amp = 0.0001;
+    uint localIndex = modula(gl_GlobalInvocationID.x,2);
     vec3 pos = vec3(gl_GlobalInvocationID);
     pos += chunkID * float(chunkSize-1);
-    uint value = remap(getNoise(pos * freq) * amp);//uint(mix(0,255.0,float(distance(pos,vec3(12,12,12)))/20.7));//
+    uint value = remap(getNoise(pos * freq) * amp);
+    //uint(mix(0,255.0,float(distance(pos,vec3(12,12,12)))/20.7));//
     
-    atomicOr(weightsBuffer.weights[index(gl_GlobalInvocationID)],value << (localIndex * 8));
+    atomicOr(weightsBuffer.weights[index(gl_GlobalInvocationID)],value << (localIndex * 16));
 }

@@ -9,20 +9,21 @@ const lookup = @import("marchingTable.zig");
 const point_axis = 24;
 pub const point_chunk = point_axis * point_axis * point_axis;
 
+pub const weight_type: type = u16; //reasonable types are u8,u16,u32
+pub const num_bytes_weights = point_chunk * @sizeOf(weight_type);
+
 const voxel_axis = point_axis - 1;
 const voxel_chunk = voxel_axis * voxel_axis * voxel_axis;
 const max_vertex_count = voxel_chunk * 9 * 5;
 
-const chunkSize = 16;
-
-//noise data
+const chunkSize = 16.0; //physical dimensions of a chunk
 
 //values
-
+//pass to a shader
 const seed = 28616;
 const freqeuncy = 0.03;
 const amplitude: f32 = 10;
-pub const iso: u8 = 128;
+pub const iso: f32 = 0.5;
 
 //shader
 pub var vao: gl.VertexArray = undefined;
@@ -38,7 +39,7 @@ var chunk_id_uniform_mesh: ?u32 = undefined;
 
 //assign separate vao
 pub const chunkData = struct {
-    weights: [point_chunk]u8 = undefined,
+    weights: [point_chunk]weight_type = undefined,
     vertices: []f32 = undefined,
     const Self = @This();
     pub fn bufferData(self: Self) !void {
@@ -62,7 +63,7 @@ pub fn init(alloc: *const std.mem.Allocator) !void {
     //initialize the weight buffer
     weight_buffer = gl.genBuffer();
     gl.bindBuffer(weight_buffer, .shader_storage_buffer);
-    gl.bufferUninitialized(.shader_storage_buffer, u8, point_chunk, .dynamic_copy);
+    gl.bufferUninitialized(.shader_storage_buffer, weight_type, point_chunk, .dynamic_copy);
 
     //initialize the vertex buffer
     vertex_buffer = gl.genBuffer();
@@ -97,7 +98,7 @@ pub fn init(alloc: *const std.mem.Allocator) !void {
     gl.namedBufferData(vertex_buffer, f32, @alignCast(&([_]f32{0} ** max_vertex_count)), .dynamic_copy);
 }
 pub fn calculateWeights(chunk: int3) void {
-    gl.namedBufferData(weight_buffer, u8, @alignCast(&([_]u8{0} ** point_chunk)), .dynamic_copy);
+    gl.namedBufferData(weight_buffer, weight_type, @alignCast(&([_]weight_type{0} ** point_chunk)), .dynamic_copy);
     gl.useProgram(noise_shader);
     gl.bindBufferBase(.shader_storage_buffer, 0, weight_buffer);
 
@@ -111,12 +112,11 @@ pub fn calculateWeights(chunk: int3) void {
     gl.binding.memoryBarrier(gl.binding.SHADER_STORAGE_BARRIER_BIT);
 }
 
-pub fn getWeights(chunk: int3) []u8 {
+pub fn getWeights(chunk: int3) []weight_type {
     calculateWeights(chunk);
     gl.bindBuffer(weight_buffer, .shader_storage_buffer);
-    const result = gl.mapBuffer(.shader_storage_buffer, u8, .read_only);
-
-    return result;
+    const result = gl.mapBuffer(.shader_storage_buffer, weight_type, .read_only);
+    return @as([]weight_type, @as([*]align(2) weight_type, @alignCast(result))[0..point_chunk]);
 }
 pub fn getMeshIndirect(chunkID: int3, chunk: *chunkData) !void {
     gl.namedBufferData(vertex_buffer, u8, @alignCast(&([_]u8{0} ** max_vertex_count)), .dynamic_copy);
@@ -133,6 +133,7 @@ pub fn getMeshIndirect(chunkID: int3, chunk: *chunkData) !void {
     gl.binding.dispatchCompute(group_count, group_count, group_count);
     //wait for execution to finish
     gl.binding.memoryBarrier(gl.binding.SHADER_STORAGE_BARRIER_BIT);
+
     gl.bindBuffer(vertex_counter_buffer, .atomic_counter_buffer);
     const tri_count = gl.mapBuffer(
         .atomic_counter_buffer,
@@ -141,6 +142,13 @@ pub fn getMeshIndirect(chunkID: int3, chunk: *chunkData) !void {
     );
 
     const num = tri_count[0] * 9;
+    if (num == 0) {
+        //doesnt like me using defer for some reason????
+        _ = gl.unmapNamedBuffer(vertex_counter_buffer);
+        gl.namedBufferData(vertex_counter_buffer, u32, @alignCast(&([1]u32{0})), .dynamic_read);
+        return;
+    }
+    std.debug.print("{d} \n", .{num});
     _ = gl.unmapNamedBuffer(vertex_counter_buffer);
     gl.namedBufferData(vertex_counter_buffer, u32, @alignCast(&([1]u32{0})), .dynamic_read);
     chunk.vertices = try allocator.alloc(f32, num);

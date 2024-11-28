@@ -21,7 +21,7 @@ const mouse_sensitivity: f32 = 4;
 //march
 var march_shader: gl.Program = undefined;
 var weights_buffer: gl.Buffer = undefined;
-var chunks = [_]march.chunkData{.{}} ** 27;
+var chunks = [_]march.chunkData{.{}} ** 1;
 //mouse input
 var mouse_pos: lvec2 = .{ 0, 0 };
 var mouse_delta: glib.vec2 = .{ 0, 0 };
@@ -76,19 +76,11 @@ pub fn main() !void {
     gl.depthFunc(.less_or_equal);
     //vsync
     glfw.swapInterval(0);
-    //const weights
-    //std.debug.print("{d} \n", .{verts.len});
 
     var timer = try std.time.Timer.start();
 
     try march.init(&allocator);
-    for (0..chunks.len) |i| {
-        const chunkID: glib.int3 = .{ @as(i32, @intCast(i % 3)), @as(i32, @intCast(i / 3 % 3)), @as(i32, @intCast(i / 9 % 3)) }; //
-        march.calculateWeights(chunkID);
-        try march.getMeshIndirect(chunkID, &chunks[i]);
-        //std.debug.print("{d} \n", .{chunks[i].vertices.len});
-    }
-
+    //std.debug.print("{d} jjjjjjjj\n", .{march.getWeights(.{ 0, 0, 0 })});
     while (!window.shouldClose()) {
         glfw.pollEvents();
         //clear
@@ -103,15 +95,18 @@ pub fn main() !void {
 
         try playerLoop();
         renderLoop();
+        for (chunks) |ch| ch.free();
     }
-    for (chunks) |ch| ch.free();
 }
 var testicle: f32 = 0;
 var march_verts: usize = 0;
 fn playerLoop() !void {
-
-    //std.debug.print("{d} \n", .{chunk.vertices});
-    //const verts: []f32 = marchCompute.constructMesh(marchCompute.getWeights(chunkID));
+    for (0..chunks.len) |i| {
+        //const chunkID: glib.int3 = .{ @as(i32, @intCast(i % 3)), @as(i32, @intCast(i / 3 % 3)), @as(i32, @intCast(i / 9 % 3)) }; //
+        const chunkID = glib.int3{ 0, 0, 0 };
+        march.calculateWeights(chunkID);
+        try march.getMeshIndirect(chunkID, &chunks[i]);
+    }
     //get mouse position and delta
     const y_rot_clamp: f32 = std.math.rad_per_deg * 90 - 0.001; // -epsilon
     handleMouseInput();
