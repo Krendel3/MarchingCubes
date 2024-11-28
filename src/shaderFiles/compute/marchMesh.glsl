@@ -348,7 +348,6 @@ void main(){
         vec3 v2 = interpolate(cornerOffsets[e20],cornerOffsets[e21]) + offset;
         arr[6] = v2.x;arr[7] = v2.y;arr[8] = v2.z;
         uint index = atomicCounterIncrement(counter);
-        triangles.tris[index] = float[9](0,0,0,0,0,0,0,0,0);
         triangles.tris[index] = arr;
     }
     

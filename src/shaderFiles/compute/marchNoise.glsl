@@ -36,7 +36,6 @@ float getNoise(vec3 p){
 uint remap(float f){
     return  uint(255 * (clamp(f,-1,1) * 0.5 + 0.5));
 }
-const uint ranges[4] = {4294967040,4294902015,4278255615,16777215};
 void main(){
     float freq = 0.1;
     float amp = 0.05;
@@ -44,6 +43,5 @@ void main(){
     vec3 pos = vec3(gl_GlobalInvocationID);
     pos += chunkID * float(chunkSize-1);
     uint value = remap(getNoise(pos * freq) * amp);//uint(mix(0,255.0,float(distance(pos,vec3(12,12,12)))/20.7));//
-    uint bufferValue = weightsBuffer.weights[index(gl_GlobalInvocationID)];
     atomicOr(weightsBuffer.weights[index(gl_GlobalInvocationID)],value << (localIndex * 8));
 }
