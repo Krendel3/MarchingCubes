@@ -1,5 +1,5 @@
 #version 430 core
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
+
 const uint edgeConnections[12][2] ={
     { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 0 },
     { 4, 5 }, { 5, 6 }, { 6, 7 }, { 7, 4 },
@@ -276,7 +276,7 @@ const uint triTable[256][15] = {
 };
 
 
-
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
 uniform uint chunkSize;
 uniform vec3 chunkID;
 layout(std430,binding = 0) buffer chunkWeights
@@ -294,11 +294,8 @@ uint index(uvec3 v){
 float max3 (uvec3 v) {
   return max (max (v.x, v.y), v.z);
 }
-// uint modula(uint a,uint b){
-//     return uint(a - (b * floor(a/b)));
-// }
-uint getWeightsOffset(uvec3 coord){
-    uvec3 newCoord = coord + gl_GlobalInvocationID;
+uint getWeightsOffset(uint x,uint y, uint z){
+    uvec3 newCoord = uvec3(x,y,z) + gl_GlobalInvocationID;
     uint localIndex = newCoord.x & 3;
     return 255 & (weightsBuffer.weights[index(newCoord) >> 2] >> (8 * localIndex));
 }
@@ -306,49 +303,63 @@ uint getWeightsOffset(uvec3 coord){
 vec3 interpolate(vec3 x,vec3 y){
     return mix(x,y,vec3(.5,.5,.5));
 }
+void buildTriangle(uint a, uint b, uint c,vec3 offset){
+    float arr[9];
+    uint indices[6] = {
+    edgeConnections[a][0],
+    edgeConnections[a][1],
+    edgeConnections[b][0],
+    edgeConnections[b][1],
+    edgeConnections[c][0],
+    edgeConnections[c][1]
+    };
+    vec3 v0 = interpolate(cornerOffsets[indices[0]],cornerOffsets[indices[1]]) + offset;
+    arr[0] = v0.x;arr[1] = v0.y;arr[2] = v0.z;
+    vec3 v1 = interpolate(cornerOffsets[indices[2]],cornerOffsets[indices[3]]) + offset;
+    arr[3] = v1.x;arr[4] = v1.y;arr[5] = v1.z;
+    vec3 v2 = interpolate(cornerOffsets[indices[4]],cornerOffsets[indices[5]]) + offset;
+    arr[6] = v2.x;arr[7] = v2.y;arr[8] = v2.z;
+    uint index = atomicCounterIncrement(counter);
+    triangles.tris[index] = arr;
+}
+
 void main(){
     if(max3(gl_GlobalInvocationID) >= (chunkSize - 1)) return;
     
     uint iso = 128;
 
     uint cubeValues[8] = {
-        getWeightsOffset(uvec3(0,0,1)),
-        getWeightsOffset(uvec3(1,0,1)),
-        getWeightsOffset(uvec3(1,0,0)),
-        getWeightsOffset(uvec3(0,0,0)),
-        getWeightsOffset(uvec3(0,1,1)),
-        getWeightsOffset(uvec3(1,1,1)),
-        getWeightsOffset(uvec3(1,1,0)),
-        getWeightsOffset(uvec3(0,1,0)),
+        getWeightsOffset(0,0,1),
+        getWeightsOffset(1,0,1),
+        getWeightsOffset(1,0,0),
+        getWeightsOffset(0,0,0),
+        getWeightsOffset(0,1,1),
+        getWeightsOffset(1,1,1),
+        getWeightsOffset(1,1,0),
+        getWeightsOffset(0,1,0),
     };
     uint cubeIndex = 0;
-    cubeIndex |= uint(cubeValues[0] <= iso) * 1;
-    cubeIndex |= uint(cubeValues[1] <= iso) * 2;
-    cubeIndex |= uint(cubeValues[2] <= iso) * 4;
-    cubeIndex |= uint(cubeValues[3] <= iso) * 8;
-    cubeIndex |= uint(cubeValues[4] <= iso) * 16;
-    cubeIndex |= uint(cubeValues[5] <= iso) * 32;
-    cubeIndex |= uint(cubeValues[6] <= iso) * 64;
-    cubeIndex |= uint(cubeValues[7] <= iso) * 128;
-    
+    if(cubeValues[0] <= iso)cubeIndex |= 1;
+    if(cubeValues[1] <= iso)cubeIndex |= 2;
+    if(cubeValues[2] <= iso)cubeIndex |= 4;
+    if(cubeValues[3] <= iso)cubeIndex |= 8;
+    if(cubeValues[4] <= iso)cubeIndex |= 16;
+    if(cubeValues[5] <= iso)cubeIndex |= 32;
+    if(cubeValues[6] <= iso)cubeIndex |= 64;
+    if(cubeValues[7] <= iso)cubeIndex |= 128;
+
     vec3 offset = vec3(chunkID * (chunkSize-1) + gl_GlobalInvocationID);
     uint edges[15] = triTable[cubeIndex];
-    for (int i = 0; edges[i] != 12 && i < 15; i +=3){
-        uint e00 = edgeConnections[edges[i]][0];
-        uint e01 = edgeConnections[edges[i]][1];
-        uint e10 = edgeConnections[edges[i + 1]][0];
-        uint e11 = edgeConnections[edges[i + 1]][1];
-        uint e20 = edgeConnections[edges[i + 2]][0];
-        uint e21 = edgeConnections[edges[i + 2]][1];
-        float arr[9];
-        vec3 v0 = interpolate(cornerOffsets[e00],cornerOffsets[e01]) + offset;
-        arr[0] = v0.x;arr[1] = v0.y;arr[2] = v0.z;
-        vec3 v1 = interpolate(cornerOffsets[e10],cornerOffsets[e11]) + offset;
-        arr[3] = v1.x;arr[4] = v1.y;arr[5] = v1.z;
-        vec3 v2 = interpolate(cornerOffsets[e20],cornerOffsets[e21]) + offset;
-        arr[6] = v2.x;arr[7] = v2.y;arr[8] = v2.z;
-        uint index = atomicCounterIncrement(counter);
-        triangles.tris[index] = arr;
-    }
+        
+    if(edges[0] == 12)return;
+    buildTriangle(edges[0],edges[0 + 1], edges[0 + 2],offset);
+    if(edges[3] == 12)return;
+    buildTriangle(edges[3],edges[3 + 1], edges[3 + 2],offset);
+    if(edges[6] == 12)return;
+    buildTriangle(edges[6],edges[6 + 1], edges[6 + 2],offset);
+    if(edges[9] == 12)return;
+    buildTriangle(edges[9],edges[9 + 1], edges[9 + 2],offset);
+    if(edges[12] == 12)return;
+    buildTriangle(edges[12],edges[12 + 1], edges[12 + 2],offset);
     
 }

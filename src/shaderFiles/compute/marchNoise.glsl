@@ -37,8 +37,8 @@ uint remap(float f){
     return  uint(255 * (clamp(f,-1,1) * 0.5 + 0.5));
 }
 void main(){
-    float freq = 0.1;
-    float amp = 0.05;
+    float freq = 0.075;
+    float amp = 0.03;
     uint localIndex = gl_GlobalInvocationID.x & 3;
     vec3 pos = vec3(gl_GlobalInvocationID);
     pos += chunkID * float(chunkSize-1);

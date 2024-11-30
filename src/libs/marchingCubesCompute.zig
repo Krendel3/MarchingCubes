@@ -5,6 +5,7 @@ const glib = @import("../glib.zig");
 const int3 = glib.int3;
 const vec3 = glib.vec3;
 const lookup = @import("marchingTable.zig");
+const main = @import("../main.zig");
 
 const point_axis = 24;
 pub const point_chunk = point_axis * point_axis * point_axis;
@@ -116,6 +117,7 @@ pub fn calculateWeights(chunk: int3) void {
     gl.binding.dispatchCompute(group_count, group_count, group_count);
     //wait for execution to finish
     gl.binding.memoryBarrier(gl.binding.SHADER_STORAGE_BARRIER_BIT);
+    //main.debugTime();
 }
 
 pub fn getWeights(chunk: int3) []u8 {
@@ -137,20 +139,23 @@ pub fn getMeshIndirect(chunkID: int3, chunk: *chunkData) !void {
     const group_count: c_uint = (voxel_axis + 7) / 8;
     gl.binding.dispatchCompute(group_count, group_count, group_count);
     //wait for execution to finish
+
+    //grust;
     gl.binding.memoryBarrier(gl.binding.SHADER_STORAGE_BARRIER_BIT);
     gl.bindBuffer(vertex_counter_buffer, .atomic_counter_buffer);
     const tri_count = gl.mapBuffer(
         .atomic_counter_buffer,
         u32,
-        .read_only,
+        .read_write,
     );
 
     const num = tri_count[0] * 9;
+    tri_count[0] = 0;
     _ = gl.unmapNamedBuffer(vertex_counter_buffer);
-    gl.namedBufferData(vertex_counter_buffer, u32, @alignCast(&([1]u32{0})), .dynamic_read);
 
     chunk.vertices = try allocator.alloc(f32, num);
     gl.binding.getNamedBufferSubData(@intFromEnum(vertex_buffer), 0, num * 4, chunk.vertices.ptr);
+    //main.debugTime(); 
 }
 pub fn i2v(i: int3) glib.vec3 {
     return glib.vec3{
