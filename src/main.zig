@@ -5,8 +5,8 @@ const gl = @import("zgl");
 const zm = @import("zmath");
 
 const march = @import("libs/marchingCubesCompute.zig");
-const shaders = @import("shaders.zig");
-const glib = @import("glib.zig");
+const shaders = @import("libs/shaders.zig");
+const glib = @import("libs/glib.zig");
 
 const lvec2 = @Vector(2, f64);
 // global
@@ -84,7 +84,8 @@ pub fn main() !void {
     
     timer = try std.time.Timer.start();
     try march.init(&allocator);
-
+    defer march.deinit();
+    march.carve(.{0,0,0},10,1);
     while (!window.shouldClose()) {
         glfw.pollEvents();
         //clear
@@ -146,11 +147,12 @@ fn renderLoop() void {
     gl.useProgram(march_shader);
 
     const march_matrix_attrib = gl.getUniformLocation(march_shader, "matrix");
-    gl.binding.uniformMatrix4fv(@intCast(march_matrix_attrib.?), @as(gl.SizeI, @intCast(1)), gl.binding.TRUE, zm.arrNPtr(&w2c));
+    gl.binding.uniformMatrix4fv(@intCast(march_matrix_attrib.?), 1, gl.binding.TRUE, zm.arrNPtr(&w2c));
     gl.bindBuffer(.invalid, .array_buffer);
     for (0..chunks.len) |i| {
-        try march.drawChunk(&chunks[i]);
+        try chunks[i].draw();
     }
+    
     window.swapBuffers();
 }
 

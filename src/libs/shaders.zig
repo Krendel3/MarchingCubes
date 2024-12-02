@@ -3,6 +3,10 @@ const gl = @import("zgl");
 const std = @import("std");
 const shader_path = "./src/shaderFiles/";
 const compute_shader_path = shader_path ++ "compute/";
+pub fn setAttribute(value : anytype, name : [:0]const u8, program : gl.Program,func : fn (?u32,@TypeOf(value)) void) void{
+    gl.useProgram(program);
+    func(gl.getUniformLocation(program, name),value);
+}
 pub fn computeProgramFromFile(comptime file_name: []const u8, allocator: *const std.mem.Allocator) !gl.Program {
     const source = try stringFromFile(compute_shader_path ++ file_name ++ ".glsl"[0..], allocator);
 
@@ -74,7 +78,7 @@ fn stringFromFiles(comptime file_name: []const u8, comptime include_name: []cons
     const include = try (try std.fs.cwd().openFile(include_name, .{})).readToEndAlloc(allocator.*, std.math.maxInt(usize));
     const main = try (try std.fs.cwd().openFile(file_name, .{})).readToEndAlloc(allocator.*, std.math.maxInt(usize));
     //var buffer : [sum_len + main_len:0]u8 = undefined;
-
+    //CLOSE FILES !
     defer allocator.free(main);
     defer allocator.free(include);
     const buffer = try allocator.alloc(u8, include.len + main.len + 2); //2 for \n
