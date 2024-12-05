@@ -84,8 +84,15 @@ pub fn main() !void {
     
     timer = try std.time.Timer.start();
     try march.init(&allocator);
+    for (0..chunks.len) |i| {
+        const chunkID: glib.int3 = .{ @as(i32, @intCast(i % ch_dim)), @as(i32, @intCast(i / ch_dim % ch_dim)), @as(i32, @intCast(i / (ch_dim * ch_dim) % ch_dim)) }; //
+        try march.weightMap.put(chunkID,&chunks[i]);
+        try march.updateChunk(&chunks[i], chunkID);
+        
+    }
     defer march.deinit();
-    march.carve(.{0,0,0},10,1);
+
+    try march.carve(.{45,35,13},12,1);
     while (!window.shouldClose()) {
         glfw.pollEvents();
         //clear
@@ -100,9 +107,10 @@ pub fn main() !void {
         if (frame_counter >= fps_sample_count) try showFps();
 
         try playerLoop();
+        
         renderLoop();
-        for (chunks) |ch| ch.free();
-    }
+        
+    }for (chunks) |ch| ch.free();
 }
 pub fn debugTime() void{
     const current = @as(f64, @floatFromInt(timer.read())) / @as(f64, @floatFromInt(std.time.ns_per_s));
@@ -112,11 +120,7 @@ pub fn debugTime() void{
 var testicle: f32 = 0;
 var march_verts: usize = 0;
 fn playerLoop() !void {
-    for (0..chunks.len) |i| {
-        const chunkID: glib.int3 = .{ @as(i32, @intCast(i % ch_dim)), @as(i32, @intCast(i / ch_dim % ch_dim)), @as(i32, @intCast(i / (ch_dim * ch_dim) % ch_dim)) }; //
-        try march.updateChunk(&chunks[i], chunkID);
-        
-    }
+    
     
     //get mouse position and delta
     const y_rot_clamp: f32 = std.math.rad_per_deg * 90 - 0.001; // -epsilon

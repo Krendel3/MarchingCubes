@@ -303,15 +303,15 @@ uint getWeightsOffset(uint x,uint y, uint z){
 vec3 interpolate(vec3 x,vec3 y){
     return mix(x,y,vec3(.5,.5,.5));
 }
-void buildTriangle(uint a, uint b, uint c,vec3 offset){
+void buildTriangle(uint edges[15],uint vals[8],uint edgeIndex,vec3 offset){
     float arr[9];
     uint indices[6] = {
-    edgeConnections[a][0],
-    edgeConnections[a][1],
-    edgeConnections[b][0],
-    edgeConnections[b][1],
-    edgeConnections[c][0],
-    edgeConnections[c][1]
+    edgeConnections[edges[edgeIndex]][0],
+    edgeConnections[edges[edgeIndex]][1],
+    edgeConnections[edges[edgeIndex + 1]][0],
+    edgeConnections[edges[edgeIndex + 1]][1],
+    edgeConnections[edges[edgeIndex + 2]][0],
+    edgeConnections[edges[edgeIndex + 2]][1]
     };
     vec3 v0 = interpolate(cornerOffsets[indices[0]],cornerOffsets[indices[1]]) + offset;
     arr[0] = v0.x;arr[1] = v0.y;arr[2] = v0.z;
@@ -352,14 +352,14 @@ void main(){
     uint edges[15] = triTable[cubeIndex];
         
     if(edges[0] == 12)return;
-    buildTriangle(edges[0],edges[0 + 1], edges[0 + 2],offset);
+    buildTriangle(edges,cubeValues,0,offset);
     if(edges[3] == 12)return;
-    buildTriangle(edges[3],edges[3 + 1], edges[3 + 2],offset);
+    buildTriangle(edges,cubeValues,3,offset);
     if(edges[6] == 12)return;
-    buildTriangle(edges[6],edges[6 + 1], edges[6 + 2],offset);
+    buildTriangle(edges,cubeValues,6,offset);
     if(edges[9] == 12)return;
-    buildTriangle(edges[9],edges[9 + 1], edges[9 + 2],offset);
+    buildTriangle(edges,cubeValues,9,offset);
     if(edges[12] == 12)return;
-    buildTriangle(edges[12],edges[12 + 1], edges[12 + 2],offset);
+    buildTriangle(edges,cubeValues,12,offset);
     
 }

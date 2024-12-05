@@ -4,7 +4,7 @@ uniform uint chunkSize = 24;
 uniform vec3 chunkID;
 
 uniform vec3 point;
-uint amount = 1;
+uint amount = 255;
 float radius = 10;
 
 layout(std430,binding = 0) buffer chunkWeights
@@ -16,10 +16,9 @@ uint index(uvec3 v){
 }
 void main(){
     uint localIndex = gl_GlobalInvocationID.x & 3;
-    uint newVal = weightsBuffer.weights[index(gl_GlobalInvocationID)];
-    newVal = (newVal << (localIndex * 8)) & 255 - 1;
-    atomicExchange(weightsBuffer.weights[index(gl_GlobalInvocationID)],
-    );
-    ,value 
-    atomicOr();
+    vec3 pos = vec3(gl_GlobalInvocationID);
+    pos += chunkID * float(chunkSize-1);
+    if(distance(point,pos) > radius)return;
+    atomicAnd(weightsBuffer.weights[index(gl_GlobalInvocationID)],~(255 << (localIndex * 8)));
+
 }
