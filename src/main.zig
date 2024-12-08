@@ -21,8 +21,9 @@ const mouse_sensitivity: f32 = 4;
 //march
 var march_shader: gl.Program = undefined;
 var weights_buffer: gl.Buffer = undefined;
-const ch_dim = 3;
-var chunks = [_]march.chunkData{.{}} ** (ch_dim * ch_dim * ch_dim);
+// const ch_dim = 3;
+// var chunks = [_]march.chunkData{.{}} ** (ch_dim * ch_dim * ch_dim);
+
 //mouse input
 var mouse_pos: lvec2 = .{ 0, 0 };
 var mouse_delta: glib.vec2 = .{ 0, 0 };
@@ -33,14 +34,14 @@ var light_dir = glib.normalize(glib.vec3{ 0.15, -0.4, 0.25 });
 var first_frame = true;
 
 //time
-var timer : std.time.Timer= undefined;
+var timer: std.time.Timer = undefined;
 var time: f64 = 0.0;
 var prev_time: f64 = 0.0;
 var delta_time: f64 = 0.0;
 var frame_counter: u8 = 0;
 var delta_sum: f64 = 0;
 const fps_sample_count: u8 = 60;
-var measure : f64 = 0;
+var measure: f64 = 0;
 
 pub fn main() !void {
     try glfw.init();
@@ -65,7 +66,7 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-    march_shader = try shaders.shaderProgramFromFiles("simple", &allocator);
+    march_shader = try shaders.shaderProgramFromFiles("simple", allocator);
 
     //lock and hide cursor
     window.setInputMode(.cursor, .disabled);
@@ -81,18 +82,10 @@ pub fn main() !void {
     glfw.swapInterval(0);
     //const weights
 
-    
     timer = try std.time.Timer.start();
-    try march.init(&allocator);
-    for (0..chunks.len) |i| {
-        const chunkID: glib.int3 = .{ @as(i32, @intCast(i % ch_dim)), @as(i32, @intCast(i / ch_dim % ch_dim)), @as(i32, @intCast(i / (ch_dim * ch_dim) % ch_dim)) }; //
-        try march.weightMap.put(chunkID,&chunks[i]);
-        try march.updateChunk(&chunks[i], chunkID);
-        
-    }
+    try march.init(allocator);
     defer march.deinit();
 
-    try march.carve(.{45,35,13},12,1);
     while (!window.shouldClose()) {
         glfw.pollEvents();
         //clear
@@ -107,23 +100,22 @@ pub fn main() !void {
         if (frame_counter >= fps_sample_count) try showFps();
 
         try playerLoop();
-        
-        renderLoop();
-        
-    }for (chunks) |ch| ch.free();
+
+        try renderLoop();
+    }
+    //for (chunks) |ch| ch.free();
 }
-pub fn debugTime() void{
+pub fn debugTime() void {
     const current = @as(f64, @floatFromInt(timer.read())) / @as(f64, @floatFromInt(std.time.ns_per_s));
-    std.debug.print("{d} \n",.{(current - measure) * 1000});
+    std.debug.print("{d} \n", .{(current - measure) * 1000});
     measure = current;
 }
 var testicle: f32 = 0;
-var march_verts: usize = 0;
 fn playerLoop() !void {
-    
-    
+    try march.loop(camera_transform.pos);
+
     //get mouse position and delta
-    const y_rot_clamp: f32 = std.math.rad_per_deg * 90 - 0.001; // -epsilon
+    const y_rot_clamp: f32 = std.math.rad_per_deg * 90 - 0.001;
     handleMouseInput();
     handleKeyInput();
     cam_rotation_xy = glib.vec2{
@@ -137,7 +129,7 @@ fn playerLoop() !void {
         0,
     });
 }
-fn renderLoop() void {
+fn renderLoop() !void {
     const size = window.getSize();
     const aspect_ratio = @as(f32, @floatFromInt(size[0])) / @as(f32, @floatFromInt(size[1]));
 
@@ -153,10 +145,10 @@ fn renderLoop() void {
     const march_matrix_attrib = gl.getUniformLocation(march_shader, "matrix");
     gl.binding.uniformMatrix4fv(@intCast(march_matrix_attrib.?), 1, gl.binding.TRUE, zm.arrNPtr(&w2c));
     gl.bindBuffer(.invalid, .array_buffer);
-    for (0..chunks.len) |i| {
-        try chunks[i].draw();
-    }
-    
+    //var iter = march.carve(camera_transform.pos, 12);
+    //while (try iter.next()) |_| {}
+    try march.drawChunks();
+
     window.swapBuffers();
 }
 

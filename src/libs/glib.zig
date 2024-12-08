@@ -125,22 +125,10 @@ pub fn magnitude(vec: anytype) @typeInfo(@TypeOf(vec)).vector.child {
     return @sqrt(sqrMagnitude(vec));
 }
 pub fn sqrMagnitude(vec: anytype) @typeInfo(@TypeOf(vec)).vector.child {
-    std.debug.assert(@typeInfo(@TypeOf(vec)) == .vector);
-    const t_info = @typeInfo(@TypeOf(vec));
-    var sqr_mag: t_info.vector.child = 0.0;
-    inline for (0..t_info.vector.len) |i| {
-        sqr_mag += vec[i] * vec[i];
-    }
-    return sqr_mag;
+    return dot(vec,vec);
 }
 pub fn dot(foo: anytype, bar: @TypeOf(foo)) @typeInfo(@TypeOf(foo)).vector.child {
-    std.debug.assert(@typeInfo(@TypeOf(foo)) == .vector);
-    const t_info = @typeInfo(@TypeOf(foo));
-    var res: t_info.vector.child = 0;
-    inline for (0..t_info.vector.len) |i| {
-        res += foo[i] * bar[i];
-    }
-    return res;
+    return @reduce(.Add, foo * bar);
 }
 pub fn splat(comptime vec: type, val: @typeInfo(vec).vector.child) vec {
     // std.debug.assert(@typeInfo(vec) == .vector);

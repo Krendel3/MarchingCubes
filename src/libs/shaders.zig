@@ -7,7 +7,7 @@ pub fn setAttribute(value : anytype, name : [:0]const u8, program : gl.Program,f
     gl.useProgram(program);
     func(gl.getUniformLocation(program, name),value);
 }
-pub fn computeProgramFromFile(comptime file_name: []const u8, allocator: *const std.mem.Allocator) !gl.Program {
+pub fn computeProgramFromFile(comptime file_name: []const u8, allocator: std.mem.Allocator) !gl.Program {
     const source = try stringFromFile(compute_shader_path ++ file_name ++ ".glsl"[0..], allocator);
 
     defer allocator.free(source);
@@ -17,7 +17,7 @@ pub fn computeProgramFromFile(comptime file_name: []const u8, allocator: *const 
     gl.linkProgram(program);
     return program;
 }
-pub fn computeProgramFromFiles(comptime file_name: []const u8, comptime include_name: []const u8, allocator: *const std.mem.Allocator) !gl.Program {
+pub fn computeProgramFromFiles(comptime file_name: []const u8, comptime include_name: []const u8, allocator: std.mem.Allocator) !gl.Program {
     const source = try stringFromFiles(
         compute_shader_path ++ file_name ++ ".glsl"[0..],
         compute_shader_path ++ "includes/" ++ include_name ++ ".glsl",
@@ -30,7 +30,7 @@ pub fn computeProgramFromFiles(comptime file_name: []const u8, comptime include_
     gl.linkProgram(program);
     return program;
 }
-pub fn shaderProgramFromFiles(comptime file_name: []const u8, allocator: *const std.mem.Allocator) !gl.Program {
+pub fn shaderProgramFromFiles(comptime file_name: []const u8, allocator: std.mem.Allocator) !gl.Program {
     const vert_result_string = try stringFromFile(shader_path ++ file_name ++ "_vert.glsl"[0..], allocator);
     const frag_result_string = try stringFromFile(shader_path ++ file_name ++ "_frag.glsl"[0..], allocator);
     defer allocator.free(vert_result_string);
@@ -69,14 +69,14 @@ fn constructShaderProgram(vert_str: []u8, frag_str: []u8) !gl.Program {
 //frag file name = fn + _frag
 //vert file name = fn + _vert
 
-fn stringFromFile(comptime file_name: []const u8, allocator: *const std.mem.Allocator) ![]u8 {
+fn stringFromFile(comptime file_name: []const u8, allocator: std.mem.Allocator) ![]u8 {
     var file = try std.fs.cwd().openFile(file_name, .{});
     defer file.close();
-    return file.readToEndAlloc(allocator.*, std.math.maxInt(usize));
+    return file.readToEndAlloc(allocator, std.math.maxInt(usize));
 }
-fn stringFromFiles(comptime file_name: []const u8, comptime include_name: []const u8, allocator: *const std.mem.Allocator) ![]u8 {
-    const include = try (try std.fs.cwd().openFile(include_name, .{})).readToEndAlloc(allocator.*, std.math.maxInt(usize));
-    const main = try (try std.fs.cwd().openFile(file_name, .{})).readToEndAlloc(allocator.*, std.math.maxInt(usize));
+fn stringFromFiles(comptime file_name: []const u8, comptime include_name: []const u8, allocator: std.mem.Allocator) ![]u8 {
+    const include = try (try std.fs.cwd().openFile(include_name, .{})).readToEndAlloc(allocator, std.math.maxInt(usize));
+    const main = try (try std.fs.cwd().openFile(file_name, .{})).readToEndAlloc(allocator, std.math.maxInt(usize));
     //var buffer : [sum_len + main_len:0]u8 = undefined;
     //CLOSE FILES !
     defer allocator.free(main);

@@ -42,6 +42,6 @@ void main(){
     uint localIndex = gl_GlobalInvocationID.x & 3;
     vec3 pos = vec3(gl_GlobalInvocationID);
     pos += chunkID * float(chunkSize-1);
-    uint value = remap(getNoise(pos * freq) * amp);//uint(mix(0,255.0,float(distance(pos,vec3(12,12,12)))/20.7));//
+    uint value = remap(getNoise(pos * freq) * amp);
     atomicOr(weightsBuffer.weights[index(gl_GlobalInvocationID)],value << (localIndex * 8));
 }

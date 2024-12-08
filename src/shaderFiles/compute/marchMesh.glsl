@@ -339,14 +339,14 @@ void main(){
         getWeightsOffset(0,1,0),
     };
     uint cubeIndex = 0;
-    if(cubeValues[0] <= iso)cubeIndex |= 1;
-    if(cubeValues[1] <= iso)cubeIndex |= 2;
-    if(cubeValues[2] <= iso)cubeIndex |= 4;
-    if(cubeValues[3] <= iso)cubeIndex |= 8;
-    if(cubeValues[4] <= iso)cubeIndex |= 16;
-    if(cubeValues[5] <= iso)cubeIndex |= 32;
-    if(cubeValues[6] <= iso)cubeIndex |= 64;
-    if(cubeValues[7] <= iso)cubeIndex |= 128;
+    if(cubeValues[0] > iso)cubeIndex |= 1;
+    if(cubeValues[1] > iso)cubeIndex |= 2;
+    if(cubeValues[2] > iso)cubeIndex |= 4;
+    if(cubeValues[3] > iso)cubeIndex |= 8;
+    if(cubeValues[4] > iso)cubeIndex |= 16;
+    if(cubeValues[5] > iso)cubeIndex |= 32;
+    if(cubeValues[6] > iso)cubeIndex |= 64;
+    if(cubeValues[7] > iso)cubeIndex |= 128;
 
     vec3 offset = vec3(chunkID * (chunkSize-1) + gl_GlobalInvocationID);
     uint edges[15] = triTable[cubeIndex];
