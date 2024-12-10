@@ -7,20 +7,20 @@ const vec3 = glib.vec3;
 const main = @import("../main.zig");
 
 const w = u8; //weight type
-const point_axis = 24;
+const point_axis = 16;
 pub const point_chunk = point_axis * point_axis * point_axis;
 
 const voxel_axis = point_axis - 1;
 const voxel_chunk = voxel_axis * voxel_axis * voxel_axis;
 const max_vertex_count = voxel_chunk * 9 * 5;
 
-const chunk_size: f32 = 32;
+const chunk_size: f32 = 24;
 //chunking
 var weight_map: std.AutoHashMap(int3, []align(1) w) = undefined;
 pub var chunk_map: std.AutoHashMap(int3, chunkData) = undefined;
-const render_distance: u8 = 5;
+const render_distance: u8 = 10;
 var offsets: []int3 = undefined;
-const max_updates_per_frame = 3;
+const max_updates_per_frame = 2;
 
 const seed = 28616;
 const freqeuncy = 0.03;
@@ -28,9 +28,7 @@ const amplitude: f32 = 10;
 pub const iso: w = 128;
 
 //shader
-var vao: gl.VertexArray = undefined;
 var weight_buffer: gl.Buffer = undefined;
-var vertex_buffer: gl.Buffer = undefined;
 var vertex_counter_buffer: gl.Buffer = undefined;
 
 var noise_shader: gl.Program = undefined;
@@ -67,26 +65,31 @@ pub const ChunkIdIterator = struct {
 
 //assign separate vao
 pub const chunkData = struct {
-    vertices: []f32 = undefined,
+    vertex_count: u32 = 0,
+    buffer: gl.Buffer = undefined,
+    vao: gl.VertexArray = undefined,
     const Self = @This();
 
-    pub fn bufferData(self: Self) !void {
-        gl.namedBufferSubData(
-            vertex_buffer,
-            0,
-            f32,
-            @alignCast(self.vertices),
-        );
+    pub fn init(self: *Self) void {
+        self.buffer = gl.genBuffer();
+        self.vao = gl.genVertexArray();
+
+        gl.bindBuffer(self.buffer, .array_buffer);
+        gl.bindVertexArray(self.vao);
+        gl.bufferUninitialized(.array_buffer, f32, voxel_chunk * 5 * 9, .dynamic_draw);
+        gl.vertexAttribPointer(0, 3, .float, false, 3 * 4, 0);
+        gl.enableVertexAttribArray(0);
     }
+
     pub fn draw(self: Self) !void {
-        if (self.vertices.len > max_vertex_count) return;
-        try self.bufferData();
-        gl.bindVertexArray(vao);
-        gl.drawArrays(.triangles, 0, self.vertices.len);
+        if (self.vertex_count > max_vertex_count) return;
+        gl.bindVertexArray(self.vao);
+        gl.drawArrays(.triangles, 0, self.vertex_count);
     }
 
     pub fn free(self: Self) void {
-        allocator.free(self.vertices);
+        gl.deleteBuffer(self.buffer);
+        gl.deleteVertexArray(self.vao);
     }
 };
 const marchError = error{
@@ -104,10 +107,10 @@ pub fn loop(player_pos: vec3) !void {
             try chunk_map.put(global, .{});
 
             const new_ptr = chunk_map.getPtr(global).?;
+            new_ptr.init();
             try updateChunk(new_ptr, global);
             count += 1;
             if (count >= max_updates_per_frame) break;
-            //stop after a couple of chunks were updated
         }
     }
 
@@ -116,13 +119,18 @@ pub fn loop(player_pos: vec3) !void {
 
     var iter = chunk_map.iterator();
     //leave onle chunk_map remove active_chunks
+
     while (iter.next()) |c| {
         const cid = c.key_ptr.*;
-        if (glib.sqrMagnitude(cid - player_coord) > render_distance * render_distance * 2) {
+        if (glib.sqrMagnitude(cid - player_coord) > render_distance * render_distance) {
             try to_delete.append(cid);
         }
     }
+    //chunk gets corrupted when deleted
+    //problem is probably not in extra data in vertex buffer
+
     for (to_delete.items) |c| {
+        chunk_map.get(c).?.free();
         _ = chunk_map.remove(c);
     }
 }
@@ -131,9 +139,11 @@ pub fn drawChunks() !void {
     var count: usize = 0;
     while (iter.next()) |c| {
         try c.value_ptr.*.draw();
+        //std.debug.print("{d} ", .{c.key_ptr.*});
         count += 1;
     }
-    std.debug.print("{d} = tris {d} \n", .{ count, offsets.len });
+
+    //std.debug.print("\n {d} = tris {d} \n", .{ count, offsets.len });
 }
 pub fn updateChunk(chunk: *chunkData, chunkID: int3) !void {
     setWeights(chunkID);
@@ -224,7 +234,7 @@ pub fn getWeights(chunkID: int3, chunk: *chunkData) void {
 pub fn getMeshIndirect(chunkID: int3, chunk: *chunkData) !void {
     gl.useProgram(mesh_shader);
     gl.bindBufferBase(.shader_storage_buffer, 0, weight_buffer);
-    gl.bindBufferBase(.shader_storage_buffer, 1, vertex_buffer);
+    gl.bindBufferBase(.shader_storage_buffer, 1, chunk.buffer);
     gl.bindBufferBase(.atomic_counter_buffer, 2, vertex_counter_buffer);
 
     const chunkIDF = i2v(chunkID);
@@ -240,16 +250,11 @@ pub fn getMeshIndirect(chunkID: int3, chunk: *chunkData) !void {
         u32,
         .read_write,
     );
-
-    const num = tri_count[0] * 9;
+    chunk.vertex_count = tri_count[0] * 9;
     tri_count[0] = 0;
-
     _ = gl.unmapNamedBuffer(vertex_counter_buffer);
-
-    chunk.vertices = try allocator.alloc(f32, num);
-
-    gl.binding.getNamedBufferSubData(@intFromEnum(vertex_buffer), 0, num * 4, chunk.vertices.ptr);
-    //main.debugTime();
+    //mark remaining space as empty | should be unneccesary ??
+    gl.binding.namedBufferSubData(@intFromEnum(chunk.buffer), chunk.vertex_count * 4, (max_vertex_count - chunk.vertex_count) * 4, (&([_]f32{0} ** (max_vertex_count))).ptr);
 }
 pub fn init(alloc: std.mem.Allocator) !void {
     //initialize the weight buffer
@@ -257,15 +262,10 @@ pub fn init(alloc: std.mem.Allocator) !void {
     gl.bindBuffer(weight_buffer, .shader_storage_buffer);
     gl.bufferUninitialized(.shader_storage_buffer, w, point_chunk, .dynamic_read);
 
-    //initialize the vertex buffer
-    vertex_buffer = gl.genBuffer();
-    gl.bindBuffer(vertex_buffer, .shader_storage_buffer);
-    gl.bufferUninitialized(.shader_storage_buffer, [3]glib.vec3, voxel_chunk * 5, .dynamic_read);
-
     //initialize the atomic vertex counter buffer
     vertex_counter_buffer = gl.genBuffer();
     gl.bindBuffer(vertex_counter_buffer, .atomic_counter_buffer);
-    gl.bufferUninitialized(.atomic_counter_buffer, c_uint, 1, .dynamic_read);
+    gl.bufferUninitialized(.atomic_counter_buffer, c_uint, 1, .dynamic_draw);
 
     allocator = alloc;
     arena = std.heap.ArenaAllocator.init(allocator);
@@ -281,12 +281,6 @@ pub fn init(alloc: std.mem.Allocator) !void {
     shaders.setAttribute(chunk_size, "chunkSize", noise_shader, gl.uniform1f);
     shaders.setAttribute(chunk_size, "chunkSize", mesh_shader, gl.uniform1f);
     shaders.setAttribute(chunk_size, "chunkSize", terraform_shader, gl.uniform1f);
-
-    vao = gl.genVertexArray();
-    gl.bindVertexArray(vao);
-    gl.bindBuffer(vertex_buffer, .array_buffer);
-    gl.vertexAttribPointer(0, 3, .float, false, 3 * 4, 0);
-    gl.enableVertexAttribArray(0);
 
     weight_map = @TypeOf(weight_map).init(arena.allocator());
     chunk_map = @TypeOf(chunk_map).init(arena.allocator());

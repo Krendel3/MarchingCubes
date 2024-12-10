@@ -144,7 +144,7 @@ fn renderLoop() !void {
 
     const march_matrix_attrib = gl.getUniformLocation(march_shader, "matrix");
     gl.binding.uniformMatrix4fv(@intCast(march_matrix_attrib.?), 1, gl.binding.TRUE, zm.arrNPtr(&w2c));
-    gl.bindBuffer(.invalid, .array_buffer);
+
     //var iter = march.carve(camera_transform.pos, 12);
     //while (try iter.next()) |_| {}
     try march.drawChunks();
