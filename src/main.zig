@@ -117,7 +117,7 @@ fn playerLoop() !void {
     //get mouse position and delta
     const y_rot_clamp: f32 = std.math.rad_per_deg * 90 - 0.001;
     handleMouseInput();
-    handleKeyInput();
+    try handleKeyInput();
     cam_rotation_xy = glib.vec2{
         std.math.clamp(cam_rotation_xy[0] + mouse_delta[1], -y_rot_clamp, y_rot_clamp),
         cam_rotation_xy[1] + mouse_delta[0],
@@ -152,9 +152,15 @@ fn renderLoop() !void {
     window.swapBuffers();
 }
 
-fn handleKeyInput() void {
+fn handleKeyInput() !void {
     if (window.getKey(.t) == .press) light_dir = glib.as(camera_transform.viewDir(), glib.vec3);
-    if (window.getKey(.q) == .press) testicle += 0.01;
+    if (window.getKey(.q) == .press) {
+        var iter = march.carve(camera_transform.pos, 12);
+        while (try iter.next()) |c| {
+            const ptr = march.chunk_map.getPtr(c) orelse break;
+            try march.updateChunk(ptr, c);
+        }
+    }
     var y_offset: f32 = 0;
     var raw_move_dir: glib.vec3 = @splat(0);
     if (window.getKey(.w) == .press) raw_move_dir += glib.vec3{ 0.0, 0.0, 1.0 };

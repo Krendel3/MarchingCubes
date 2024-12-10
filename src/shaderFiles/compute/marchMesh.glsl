@@ -277,7 +277,8 @@ const uint triTable[256][15] = {
 
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
-uniform uint chunkSize;
+uniform float chunkSize;
+uniform uint pointsChunk;
 uniform vec3 chunkID;
 layout(std430,binding = 0) buffer chunkWeights
 {
@@ -289,7 +290,7 @@ layout(std430,binding = 1) buffer triangleBuffer
 } triangles;
 layout(binding = 2,offset = 0) uniform atomic_uint counter;
 uint index(uvec3 v){
-    return (v.x + (v.y + v.z * chunkSize) * chunkSize);
+    return (v.x + (v.y + v.z * pointsChunk) * pointsChunk);
 }
 float max3 (uvec3 v) {
   return max (max (v.x, v.y), v.z);
@@ -313,18 +314,18 @@ void buildTriangle(uint edges[15],uint vals[8],uint edgeIndex,vec3 offset){
     edgeConnections[edges[edgeIndex + 2]][0],
     edgeConnections[edges[edgeIndex + 2]][1]
     };
-    vec3 v0 = interpolate(cornerOffsets[indices[0]],cornerOffsets[indices[1]]) + offset;
+    vec3 v0 = interpolate(cornerOffsets[indices[0]],cornerOffsets[indices[1]]) / float(pointsChunk-1) * chunkSize + offset;
     arr[0] = v0.x;arr[1] = v0.y;arr[2] = v0.z;
-    vec3 v1 = interpolate(cornerOffsets[indices[2]],cornerOffsets[indices[3]]) + offset;
+    vec3 v1 = interpolate(cornerOffsets[indices[2]],cornerOffsets[indices[3]]) / float(pointsChunk-1) * chunkSize + offset;
     arr[3] = v1.x;arr[4] = v1.y;arr[5] = v1.z;
-    vec3 v2 = interpolate(cornerOffsets[indices[4]],cornerOffsets[indices[5]]) + offset;
+    vec3 v2 = interpolate(cornerOffsets[indices[4]],cornerOffsets[indices[5]]) / float(pointsChunk-1) * chunkSize + offset;
     arr[6] = v2.x;arr[7] = v2.y;arr[8] = v2.z;
     uint index = atomicCounterIncrement(counter);
     triangles.tris[index] = arr;
 }
 
 void main(){
-    if(max3(gl_GlobalInvocationID) >= (chunkSize - 1)) return;
+    if(max3(gl_GlobalInvocationID) >= (pointsChunk - 1)) return;
     
     uint iso = 128;
 
@@ -347,8 +348,11 @@ void main(){
     if(cubeValues[5] > iso)cubeIndex |= 32;
     if(cubeValues[6] > iso)cubeIndex |= 64;
     if(cubeValues[7] > iso)cubeIndex |= 128;
-
-    vec3 offset = vec3(chunkID * (chunkSize-1) + gl_GlobalInvocationID);
+    float mult = 1 / float(pointsChunk-1);
+    // vec3 offset = chunkID  + vec3(gl_GlobalInvocationID) * mult;
+    // offset *= chunkSize;
+    vec3 offset = vec3(gl_GlobalInvocationID) * chunkSize / float(pointsChunk-1);
+    offset += chunkID * chunkSize;
     uint edges[15] = triTable[cubeIndex];
         
     if(edges[0] == 12)return;

@@ -7,19 +7,20 @@ const vec3 = glib.vec3;
 const main = @import("../main.zig");
 
 const w = u8; //weight type
-const point_axis = 16;
+const point_axis = 24;
 pub const point_chunk = point_axis * point_axis * point_axis;
 
 const voxel_axis = point_axis - 1;
 const voxel_chunk = voxel_axis * voxel_axis * voxel_axis;
 const max_vertex_count = voxel_chunk * 9 * 5;
 
-const chunk_size: f32 = 24;
+const chunk_size: f32 = 32;
 //chunking
 var weight_map: std.AutoHashMap(int3, []align(1) w) = undefined;
-var chunk_map: std.AutoHashMap(int3, chunkData) = undefined;
+pub var chunk_map: std.AutoHashMap(int3, chunkData) = undefined;
 const render_distance: u8 = 5;
 var offsets: []int3 = undefined;
+const max_updates_per_frame = 3;
 
 const seed = 28616;
 const freqeuncy = 0.03;
@@ -93,7 +94,9 @@ const marchError = error{
     meshFailed,
 };
 pub fn loop(player_pos: vec3) !void {
-    const player_coord = v2i(player_pos * glib.splat(vec3, 1 / chunk_size));
+    const player_coord = v2i(player_pos * glib.splat(vec3, 1.0 / chunk_size));
+    var count: u32 = 0;
+
     for (offsets) |c| {
         const global = c + player_coord;
         const ptr = chunk_map.getPtr(global);
@@ -102,6 +105,8 @@ pub fn loop(player_pos: vec3) !void {
 
             const new_ptr = chunk_map.getPtr(global).?;
             try updateChunk(new_ptr, global);
+            count += 1;
+            if (count >= max_updates_per_frame) break;
             //stop after a couple of chunks were updated
         }
     }
@@ -123,9 +128,12 @@ pub fn loop(player_pos: vec3) !void {
 }
 pub fn drawChunks() !void {
     var iter = chunk_map.iterator();
+    var count: usize = 0;
     while (iter.next()) |c| {
         try c.value_ptr.*.draw();
+        count += 1;
     }
+    std.debug.print("{d} = tris {d} \n", .{ count, offsets.len });
 }
 pub fn updateChunk(chunk: *chunkData, chunkID: int3) !void {
     setWeights(chunkID);
@@ -136,7 +144,6 @@ pub fn updateChunk(chunk: *chunkData, chunkID: int3) !void {
 pub fn carve(point: glib.vec3, radius: f32) ChunkIdIterator {
     shaders.setAttribute(@as([]const [3]f32, (&point)[0..1]), "point", terraform_shader, gl.uniform3fv);
     shaders.setAttribute(@as(f32, radius), "radius", terraform_shader, gl.uniform1f);
-    shaders.setAttribute(@as(u32, point_axis), "chunkSize", terraform_shader, gl.uniform1ui);
 
     const bitmask = getNearChunks(point, std.math.clamp(radius, 0.0001, chunk_size * 0.5 - 0.0001));
     const cid = v2i((point - glib.splat(vec3, radius)) / glib.splat(vec3, chunk_size));
@@ -188,7 +195,6 @@ pub fn clearWeights() void {
 }
 pub fn setWeights(chunkID: int3) void {
     if (weight_map.get(chunkID)) |weights| {
-        std.debug.print("found in weightmap\n", .{});
         gl.namedBufferData(weight_buffer, w, @constCast(weights), .dynamic_draw);
     } else calculateWeights(chunkID);
 }
@@ -268,9 +274,13 @@ pub fn init(alloc: std.mem.Allocator) !void {
     mesh_shader = try shaders.computeProgramFromFile("marchMesh", allocator);
     terraform_shader = try shaders.computeProgramFromFile("marchTerraform", allocator);
 
-    shaders.setAttribute(@as(u32, point_axis), "chunkSize", noise_shader, gl.uniform1ui);
-    shaders.setAttribute(@as(u32, point_axis), "chunkSize", mesh_shader, gl.uniform1ui);
-    shaders.setAttribute(@as(u32, point_axis), "chunkSize", terraform_shader, gl.uniform1ui);
+    shaders.setAttribute(@as(u32, point_axis), "pointsChunk", noise_shader, gl.uniform1ui);
+    shaders.setAttribute(@as(u32, point_axis), "pointsChunk", mesh_shader, gl.uniform1ui);
+    shaders.setAttribute(@as(u32, point_axis), "pointsChunk", terraform_shader, gl.uniform1ui);
+
+    shaders.setAttribute(chunk_size, "chunkSize", noise_shader, gl.uniform1f);
+    shaders.setAttribute(chunk_size, "chunkSize", mesh_shader, gl.uniform1f);
+    shaders.setAttribute(chunk_size, "chunkSize", terraform_shader, gl.uniform1f);
 
     vao = gl.genVertexArray();
     gl.bindVertexArray(vao);
@@ -324,5 +334,12 @@ pub fn bakeOffsets(rd: u8) ![]int3 {
             }
         }
     }
+    //comptime lessThanFn: fn(@TypeOf(context), lhs:T, rhs:T)bool
+    std.mem.sort(int3, list.items, {}, struct {
+        pub fn less(ctx: void, l: int3, r: int3) bool {
+            _ = ctx;
+            return glib.sqrMagnitude(l) < glib.sqrMagnitude(r);
+        }
+    }.less);
     return list.items;
 }
