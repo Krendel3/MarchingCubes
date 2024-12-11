@@ -12,7 +12,7 @@ pub const point_chunk = point_axis * point_axis * point_axis;
 
 const voxel_axis = point_axis - 1;
 const voxel_chunk = voxel_axis * voxel_axis * voxel_axis;
-const max_vertex_count = voxel_chunk * 9 * 5;
+const max_vertex_count = voxel_chunk * 3 * 5;
 
 const chunk_size: f32 = 24;
 //chunking
@@ -20,7 +20,7 @@ var weight_map: std.AutoHashMap(int3, []align(1) w) = undefined;
 pub var chunk_map: std.AutoHashMap(int3, chunkData) = undefined;
 const render_distance: u8 = 10;
 var offsets: []int3 = undefined;
-const max_updates_per_frame = 2;
+const max_updates_per_frame = 4;
 
 const seed = 28616;
 const freqeuncy = 0.03;
@@ -109,7 +109,7 @@ pub fn loop(player_pos: vec3) !void {
             const new_ptr = chunk_map.getPtr(global).?;
             new_ptr.init();
             try updateChunk(new_ptr, global);
-            count += 1;
+            if (glib.sqrMagnitude(c) > 2) count += 1;
             if (count >= max_updates_per_frame) break;
         }
     }
@@ -126,8 +126,6 @@ pub fn loop(player_pos: vec3) !void {
             try to_delete.append(cid);
         }
     }
-    //chunk gets corrupted when deleted
-    //problem is probably not in extra data in vertex buffer
 
     for (to_delete.items) |c| {
         chunk_map.get(c).?.free();
@@ -250,11 +248,10 @@ pub fn getMeshIndirect(chunkID: int3, chunk: *chunkData) !void {
         u32,
         .read_write,
     );
-    chunk.vertex_count = tri_count[0] * 9;
+    chunk.vertex_count = tri_count[0] * 3;
     tri_count[0] = 0;
     _ = gl.unmapNamedBuffer(vertex_counter_buffer);
     //mark remaining space as empty | should be unneccesary ??
-    gl.binding.namedBufferSubData(@intFromEnum(chunk.buffer), chunk.vertex_count * 4, (max_vertex_count - chunk.vertex_count) * 4, (&([_]f32{0} ** (max_vertex_count))).ptr);
 }
 pub fn init(alloc: std.mem.Allocator) !void {
     //initialize the weight buffer
@@ -288,9 +285,14 @@ pub fn init(alloc: std.mem.Allocator) !void {
 }
 
 pub fn deinit() void {
-    arena.deinit();
-    weight_map.deinit();
+    var iter = chunk_map.iterator();
+    while (iter.next()) |c| {
+        c.value_ptr.*.free();
+    }
     chunk_map.deinit();
+    weight_map.deinit();
+
+    arena.deinit();
 }
 pub fn i2v(i: int3) glib.vec3 {
     return glib.vec3{

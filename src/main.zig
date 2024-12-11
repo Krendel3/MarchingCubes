@@ -49,61 +49,62 @@ pub fn main() !void {
 
     window = try glfw.Window.create(2560, 1440, "march", null);
     defer window.destroy();
+    {
+        glfw.makeContextCurrent(window);
+        const gl_major = 4;
+        const gl_minor = 0;
+        glfw.windowHintTyped(.context_version_major, gl_major);
+        glfw.windowHintTyped(.context_version_minor, gl_minor);
+        glfw.windowHintTyped(.opengl_profile, .opengl_core_profile);
+        glfw.windowHintTyped(.opengl_forward_compat, true);
+        glfw.windowHintTyped(.client_api, .opengl_api);
+        glfw.windowHintTyped(.doublebuffer, true);
+        glfw.windowHintTyped(.center_cursor, true);
 
-    glfw.makeContextCurrent(window);
-    const gl_major = 4;
-    const gl_minor = 0;
-    glfw.windowHintTyped(.context_version_major, gl_major);
-    glfw.windowHintTyped(.context_version_minor, gl_minor);
-    glfw.windowHintTyped(.opengl_profile, .opengl_core_profile);
-    glfw.windowHintTyped(.opengl_forward_compat, true);
-    glfw.windowHintTyped(.client_api, .opengl_api);
-    glfw.windowHintTyped(.doublebuffer, true);
-    glfw.windowHintTyped(.center_cursor, true);
+        try gl.loadExtensions(void, getProcAddressWrapper);
 
-    try gl.loadExtensions(void, getProcAddressWrapper);
+        var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
+        defer _ = gpa.deinit();
+        const allocator = gpa.allocator();
+        march_shader = try shaders.shaderProgramFromFiles("simple", allocator);
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-    march_shader = try shaders.shaderProgramFromFiles("simple", allocator);
+        //lock and hide cursor
+        window.setInputMode(.cursor, .disabled);
 
-    //lock and hide cursor
-    window.setInputMode(.cursor, .disabled);
+        //set the clockwise winding order
+        gl.frontFace(.cw);
 
-    //set the clockwise winding order
-    gl.frontFace(.cw);
+        //enable culling,depth testing
+        gl.enable(.cull_face);
+        gl.enable(.depth_test);
+        gl.depthFunc(.less_or_equal);
+        //vsync
+        glfw.swapInterval(0);
+        //const weights
+        {
+            timer = try std.time.Timer.start();
+            try march.init(allocator);
+            defer march.deinit();
 
-    //enable culling,depth testing
-    gl.enable(.cull_face);
-    gl.enable(.depth_test);
-    gl.depthFunc(.less_or_equal);
-    //vsync
-    glfw.swapInterval(0);
-    //const weights
+            while (!window.shouldClose()) {
+                glfw.pollEvents();
+                //clear
+                time = @as(f64, @floatFromInt(timer.read())) / @as(f64, @floatFromInt(std.time.ns_per_s));
+                delta_time = time - prev_time;
+                delta_sum += delta_time;
 
-    timer = try std.time.Timer.start();
-    try march.init(allocator);
-    defer march.deinit();
+                prev_time = time;
+                measure = time;
+                frame_counter += 1;
 
-    while (!window.shouldClose()) {
-        glfw.pollEvents();
-        //clear
-        time = @as(f64, @floatFromInt(timer.read())) / @as(f64, @floatFromInt(std.time.ns_per_s));
-        delta_time = time - prev_time;
-        delta_sum += delta_time;
+                if (frame_counter >= fps_sample_count) try showFps();
 
-        prev_time = time;
-        measure = time;
-        frame_counter += 1;
+                try playerLoop();
 
-        if (frame_counter >= fps_sample_count) try showFps();
-
-        try playerLoop();
-
-        try renderLoop();
+                try renderLoop();
+            }
+        }
     }
-    //for (chunks) |ch| ch.free();
 }
 pub fn debugTime() void {
     const current = @as(f64, @floatFromInt(timer.read())) / @as(f64, @floatFromInt(std.time.ns_per_s));
@@ -153,6 +154,7 @@ fn renderLoop() !void {
 }
 
 fn handleKeyInput() !void {
+    if (window.getKey(.t) == .press) window.setShouldClose(true);
     if (window.getKey(.t) == .press) light_dir = glib.as(camera_transform.viewDir(), glib.vec3);
     if (window.getKey(.q) == .press) {
         var iter = march.carve(camera_transform.pos, 12);
